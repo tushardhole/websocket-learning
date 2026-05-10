@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebSocket Echo Client</title>
+    <style>
+        body { font-family: monospace; max-width: 600px; margin: 40px auto; padding: 0 20px; }
+        #log { background: #1a1a1a; color: #0f0; padding: 16px; height: 300px; overflow-y: auto; margin: 16px 0; border-radius: 4px; }
+        .log-entry { margin: 4px 0; }
+        .sent { color: #6cf; }
+        .received { color: #0f0; }
+        .system { color: #f90; }
+        .error { color: #f33; }
+        input, button { font-family: monospace; font-size: 14px; padding: 8px; }
+        input { width: 70%; }
+        button { cursor: pointer; }
+        #status { padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+        .connected { background: #0f02; color: #0f0; border: 1px solid #0f0; }
+        .disconnected { background: #f002; color: #f33; border: 1px solid #f33; }
+    </style>
+</head>
+<body>
+    <h2>WebSocket Echo Client</h2>
+    <div>
+        <button id="connectBtn" onclick="connect()">Connect</button>
+        <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+        <span id="status" class="disconnected">DISCONNECTED</span>
+    </div>
+    <div id="log"></div>
+    <div>
+        <input id="message" type="text" placeholder="Type a message..." onkeypress="if(event.key==='Enter') send()" disabled>
+        <button id="sendBtn" onclick="send()" disabled>Send</button>
+    </div>
+
+    <script>
+        let ws = null;
+
+        function log(text, className) {
+            const el = document.getElementById('log');
+            el.innerHTML += `<div class="log-entry ${className}">${new Date().toLocaleTimeString()} | ${text}</div>`;
+            el.scrollTop = el.scrollHeight;
+        }
+
+        function setConnected(connected) {
+            document.getElementById('connectBtn').disabled = connected;
+            document.getElementById('disconnectBtn').disabled = !connected;
+            document.getElementById('message').disabled = !connected;
+            document.getElementById('sendBtn').disabled = !connected;
+            const status = document.getElementById('status');
+            status.textContent = connected ? 'CONNECTED' : 'DISCONNECTED';
+            status.className = connected ? 'connected' : 'disconnected';
+        }
+
+        function connect() {
+            ws = new WebSocket(`ws://${window.location.host}/ws/echo`);
+
+            ws.onopen = () => {
+                log('Connection established', 'system');
+                setConnected(true);
+            };
+
+            ws.onmessage = (event) => {
+                log(`← ${event.data}`, 'received');
+            };
+
+            ws.onclose = (event) => {
+                log(`Connection closed (code=${event.code}, reason=${event.reason || 'none'})`, 'system');
+                setConnected(false);
+                ws = null;
+            };
+
+            ws.onerror = (event) => {
+                log('Error occurred', 'error');
+            };
+        }
+
+        function send() {
+            const input = document.getElementById('message');
+            const text = input.value.trim();
+            if (!text || !ws) return;
+
+            ws.send(text);
+            log(`→ ${text}`, 'sent');
+            input.value = '';
+        }
+
+        function disconnect() {
+            if (ws) ws.close();
+        }
+    </script>
+</body>
+</html>

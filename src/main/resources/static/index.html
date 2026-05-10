@@ -2,48 +2,56 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>WebSocket Echo Client</title>
+    <title>WebSocket Chat Room</title>
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
     <style>
-        body { font-family: monospace; max-width: 600px; margin: 40px auto; padding: 0 20px; }
-        #log { background: #1a1a1a; color: #0f0; padding: 16px; height: 300px; overflow-y: auto; margin: 16px 0; border-radius: 4px; }
-        .log-entry { margin: 4px 0; }
-        .sent { color: #6cf; }
-        .received { color: #0f0; }
-        .system { color: #f90; }
-        .error { color: #f33; }
+        body { font-family: monospace; max-width: 700px; margin: 40px auto; padding: 0 20px; }
+        #chat-log { background: #1a1a1a; color: #eee; padding: 16px; height: 350px; overflow-y: auto; margin: 16px 0; border-radius: 4px; }
+        .msg { margin: 6px 0; }
+        .msg .sender { font-weight: bold; color: #6cf; }
+        .msg .content { color: #eee; }
+        .system { color: #f90; font-style: italic; }
         input, button { font-family: monospace; font-size: 14px; padding: 8px; }
-        input { width: 70%; }
+        #username { width: 120px; }
+        #message { width: 60%; }
         button { cursor: pointer; }
-        #status { padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+        #status { padding: 4px 8px; border-radius: 4px; font-size: 12px; display: inline-block; margin-left: 8px; }
         .connected { background: #0f02; color: #0f0; border: 1px solid #0f0; }
         .disconnected { background: #f002; color: #f33; border: 1px solid #f33; }
+        .controls { margin: 12px 0; }
     </style>
 </head>
 <body>
-    <h2>WebSocket Echo Client</h2>
-    <div>
+    <h2>STOMP Chat Room</h2>
+
+    <div class="controls">
+        <input id="username" type="text" placeholder="Your name" value="">
         <button id="connectBtn" onclick="connect()">Connect</button>
         <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
         <span id="status" class="disconnected">DISCONNECTED</span>
     </div>
-    <div id="log"></div>
+
+    <div id="chat-log"></div>
+
     <div>
         <input id="message" type="text" placeholder="Type a message..." onkeypress="if(event.key==='Enter') send()" disabled>
         <button id="sendBtn" onclick="send()" disabled>Send</button>
     </div>
 
     <script>
-        let ws = null;
+        let stompClient = null;
 
-        function log(text, className) {
-            const el = document.getElementById('log');
-            el.innerHTML += `<div class="log-entry ${className}">${new Date().toLocaleTimeString()} | ${text}</div>`;
+        function log(html) {
+            const el = document.getElementById('chat-log');
+            el.innerHTML += html;
             el.scrollTop = el.scrollHeight;
         }
 
         function setConnected(connected) {
             document.getElementById('connectBtn').disabled = connected;
             document.getElementById('disconnectBtn').disabled = !connected;
+            document.getElementById('username').disabled = connected;
             document.getElementById('message').disabled = !connected;
             document.getElementById('sendBtn').disabled = !connected;
             const status = document.getElementById('status');
@@ -52,40 +60,66 @@
         }
 
         function connect() {
-            ws = new WebSocket(`ws://${window.location.host}/ws/echo`);
+            const username = document.getElementById('username').value.trim();
+            if (!username) {
+                alert('Enter a username first');
+                return;
+            }
 
-            ws.onopen = () => {
-                log('Connection established', 'system');
+            const socket = new SockJS('/ws/chat');
+            stompClient = Stomp.over(socket);
+
+            stompClient.connect({}, function(frame) {
                 setConnected(true);
-            };
+                log('<div class="msg system">Connected to chat room</div>');
 
-            ws.onmessage = (event) => {
-                log(`← ${event.data}`, 'received');
-            };
+                // Subscribe to the topic — this is where broadcast messages arrive
+                stompClient.subscribe('/topic/messages', function(msg) {
+                    const chatMessage = JSON.parse(msg.body);
+                    if (chatMessage.type === 'CHAT') {
+                        log(`<div class="msg"><span class="sender">${chatMessage.sender}:</span> <span class="content">${chatMessage.content}</span></div>`);
+                    } else if (chatMessage.type === 'JOIN') {
+                        log(`<div class="msg system">${chatMessage.sender} joined the chat</div>`);
+                    } else if (chatMessage.type === 'LEAVE') {
+                        log(`<div class="msg system">${chatMessage.sender} left the chat</div>`);
+                    }
+                });
 
-            ws.onclose = (event) => {
-                log(`Connection closed (code=${event.code}, reason=${event.reason || 'none'})`, 'system');
-                setConnected(false);
-                ws = null;
-            };
-
-            ws.onerror = (event) => {
-                log('Error occurred', 'error');
-            };
+                // Announce join
+                stompClient.send('/app/chat', {}, JSON.stringify({
+                    sender: username,
+                    content: '',
+                    type: 'JOIN'
+                }));
+            });
         }
 
         function send() {
             const input = document.getElementById('message');
             const text = input.value.trim();
-            if (!text || !ws) return;
+            if (!text || !stompClient) return;
 
-            ws.send(text);
-            log(`→ ${text}`, 'sent');
+            const username = document.getElementById('username').value.trim();
+            stompClient.send('/app/chat', {}, JSON.stringify({
+                sender: username,
+                content: text,
+                type: 'CHAT'
+            }));
             input.value = '';
         }
 
         function disconnect() {
-            if (ws) ws.close();
+            if (stompClient) {
+                const username = document.getElementById('username').value.trim();
+                stompClient.send('/app/chat', {}, JSON.stringify({
+                    sender: username,
+                    content: '',
+                    type: 'LEAVE'
+                }));
+                stompClient.disconnect();
+            }
+            setConnected(false);
+            log('<div class="msg system">Disconnected</div>');
         }
     </script>
 </body>

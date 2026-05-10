@@ -16,16 +16,19 @@
         .msg .sender { font-weight: bold; color: #6cf; }
         .private { color: #f6f; }
         .system { color: #f90; font-style: italic; }
+        .error { color: #f33; font-weight: bold; }
         input, button, select { font-family: monospace; font-size: 14px; padding: 8px; }
         #message { width: 55%; }
         button { cursor: pointer; }
         #status { padding: 4px 8px; border-radius: 4px; font-size: 12px; display: inline-block; margin-left: 8px; }
-        .connected { background: #0f02; color: #0f0; border: 1px solid #0f0; }
-        .disconnected { background: #f002; color: #f33; border: 1px solid #f33; }
+        .status-connected { background: #0f02; color: #0f0; border: 1px solid #0f0; }
+        .status-disconnected { background: #f002; color: #f33; border: 1px solid #f33; }
+        .status-reconnecting { background: #ff02; color: #fa0; border: 1px solid #fa0; }
         .controls { margin: 12px 0; }
         .send-row { margin-top: 12px; }
         .user-item { padding: 4px 0; color: #0f0; }
         h4 { color: #999; margin: 0 0 8px 0; }
+        #reconnect-info { font-size: 11px; color: #888; margin-top: 4px; }
     </style>
 </head>
 <body>
@@ -34,8 +37,9 @@
     <div class="controls">
         <input id="username" type="text" placeholder="Your name">
         <button id="connectBtn" onclick="connect()">Connect</button>
-        <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
-        <span id="status" class="disconnected">DISCONNECTED</span>
+        <button id="disconnectBtn" onclick="manualDisconnect()" disabled>Disconnect</button>
+        <span id="status" class="status-disconnected">DISCONNECTED</span>
+        <div id="reconnect-info"></div>
     </div>
 
     <div class="layout">
@@ -60,6 +64,10 @@
     <script>
         let stompClient = null;
         let currentUser = '';
+        let reconnectAttempts = 0;
+        let maxReconnectAttempts = 5;
+        let reconnectTimer = null;
+        let intentionalDisconnect = false;
 
         function log(html) {
             const el = document.getElementById('chat-log');
@@ -67,16 +75,31 @@
             el.scrollTop = el.scrollHeight;
         }
 
-        function setConnected(connected) {
-            document.getElementById('connectBtn').disabled = connected;
-            document.getElementById('disconnectBtn').disabled = !connected;
-            document.getElementById('username').disabled = connected;
+        function setStatus(state) {
+            const status = document.getElementById('status');
+            const info = document.getElementById('reconnect-info');
+            const connected = state === 'connected';
+            const reconnecting = state === 'reconnecting';
+
+            document.getElementById('connectBtn').disabled = connected || reconnecting;
+            document.getElementById('disconnectBtn').disabled = !connected && !reconnecting;
+            document.getElementById('username').disabled = connected || reconnecting;
             document.getElementById('message').disabled = !connected;
             document.getElementById('sendBtn').disabled = !connected;
             document.getElementById('sendMode').disabled = !connected;
-            const status = document.getElementById('status');
-            status.textContent = connected ? 'CONNECTED' : 'DISCONNECTED';
-            status.className = connected ? 'connected' : 'disconnected';
+
+            if (state === 'connected') {
+                status.textContent = 'CONNECTED';
+                status.className = 'status-connected';
+                info.textContent = '';
+            } else if (state === 'reconnecting') {
+                status.textContent = 'RECONNECTING';
+                status.className = 'status-reconnecting';
+            } else {
+                status.textContent = 'DISCONNECTED';
+                status.className = 'status-disconnected';
+                info.textContent = '';
+            }
         }
 
         document.getElementById('sendMode').addEventListener('change', function() {
@@ -84,18 +107,51 @@
                 this.value === 'private' ? 'inline' : 'none';
         });
 
+        function getReconnectDelay() {
+            // Exponential backoff: 1s, 2s, 4s, 8s, 16s (capped)
+            return Math.min(1000 * Math.pow(2, reconnectAttempts), 16000);
+        }
+
+        function scheduleReconnect() {
+            if (intentionalDisconnect || reconnectAttempts >= maxReconnectAttempts) {
+                if (reconnectAttempts >= maxReconnectAttempts) {
+                    log('<div class="msg error">Reconnection failed after ' + maxReconnectAttempts + ' attempts. Click Connect to try again.</div>');
+                    setStatus('disconnected');
+                }
+                return;
+            }
+
+            const delay = getReconnectDelay();
+            const seconds = (delay / 1000).toFixed(0);
+            document.getElementById('reconnect-info').textContent =
+                'Attempt ' + (reconnectAttempts + 1) + '/' + maxReconnectAttempts + ' in ' + seconds + 's...';
+
+            setStatus('reconnecting');
+            log('<div class="msg system">Reconnecting in ' + seconds + 's (attempt ' + (reconnectAttempts + 1) + '/' + maxReconnectAttempts + ')...</div>');
+
+            reconnectTimer = setTimeout(function() {
+                reconnectAttempts++;
+                doConnect();
+            }, delay);
+        }
+
         function connect() {
             currentUser = document.getElementById('username').value.trim();
             if (!currentUser) { alert('Enter a username'); return; }
+            intentionalDisconnect = false;
+            reconnectAttempts = 0;
+            doConnect();
+        }
 
+        function doConnect() {
             const socket = new SockJS('/ws/chat?username=' + encodeURIComponent(currentUser));
             stompClient = Stomp.over(socket);
 
             stompClient.connect({}, function(frame) {
-                setConnected(true);
+                reconnectAttempts = 0;
+                setStatus('connected');
                 log('<div class="msg system">Connected as ' + currentUser + '</div>');
 
-                // Subscribe to public messages
                 stompClient.subscribe('/topic/messages', function(msg) {
                     const m = JSON.parse(msg.body);
                     if (m.type === 'CHAT') {
@@ -109,13 +165,24 @@
                     }
                 });
 
-                // Subscribe to private messages
                 stompClient.subscribe('/user/queue/private', function(msg) {
                     const m = JSON.parse(msg.body);
                     log('<div class="msg private">[PM from ' + m.sender + ']: ' + m.content + '</div>');
                 });
 
+                // Subscribe to server-side errors
+                stompClient.subscribe('/user/queue/errors', function(msg) {
+                    const err = JSON.parse(msg.body);
+                    log('<div class="msg error">Server error: ' + err.error + '</div>');
+                });
+
                 refreshUsers();
+
+            }, function(error) {
+                // Connection lost
+                log('<div class="msg error">Connection lost: ' + (error.headers ? error.headers.message : error) + '</div>');
+                setStatus('disconnected');
+                scheduleReconnect();
             });
         }
 
@@ -148,16 +215,16 @@
             fetch('/users/online')
                 .then(r => r.json())
                 .then(users => {
-                    const el = document.getElementById('online-users');
-                    el.innerHTML = users.map(u =>
-                        '<div class="user-item">' + u + '</div>'
-                    ).join('');
+                    document.getElementById('online-users').innerHTML =
+                        users.map(u => '<div class="user-item">' + u + '</div>').join('');
                 });
         }
 
-        function disconnect() {
+        function manualDisconnect() {
+            intentionalDisconnect = true;
+            if (reconnectTimer) clearTimeout(reconnectTimer);
             if (stompClient) stompClient.disconnect();
-            setConnected(false);
+            setStatus('disconnected');
             log('<div class="msg system">Disconnected</div>');
             document.getElementById('online-users').innerHTML = '';
         }

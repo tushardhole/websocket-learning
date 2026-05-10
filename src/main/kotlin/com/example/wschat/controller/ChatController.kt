@@ -21,6 +21,7 @@ class ChatController(
     @MessageMapping("/chat")
     @SendTo("/topic/messages")
     fun sendMessage(@Payload message: ChatMessage): ChatMessage {
+        require(message.content.length <= 500) { "Message too long (max 500 chars)" }
         return message
     }
 

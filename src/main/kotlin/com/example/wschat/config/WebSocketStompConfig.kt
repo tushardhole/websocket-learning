@@ -11,13 +11,16 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
 class WebSocketStompConfig : WebSocketMessageBrokerConfigurer {
 
     override fun configureMessageBroker(registry: MessageBrokerRegistry) {
-        registry.enableSimpleBroker("/topic")
+        registry.enableSimpleBroker("/topic", "/queue")
         registry.setApplicationDestinationPrefixes("/app")
+        registry.setUserDestinationPrefix("/user")
     }
 
     override fun registerStompEndpoints(registry: StompEndpointRegistry) {
         registry.addEndpoint("/ws/chat")
             .setAllowedOriginPatterns("*")
+            .addInterceptors(UserHandshakeInterceptor())
+            .setHandshakeHandler(UserPrincipalHandshakeHandler())
             .withSockJS()
     }
 }

@@ -24,6 +24,7 @@ class SecurityConfig {
                     .requestMatchers("/ws/**").permitAll()
                     .requestMatchers("/index.html", "/", "/favicon.ico").permitAll()
                     .requestMatchers("/messages/history").permitAll()
+                    .requestMatchers("/presence/**").permitAll()
                     .requestMatchers("/h2-console/**").permitAll()
                     .requestMatchers("/actuator/**").permitAll()
                     .anyRequest().authenticated()

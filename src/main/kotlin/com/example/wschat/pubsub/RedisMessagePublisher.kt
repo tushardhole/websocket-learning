@@ -25,4 +25,4 @@ class RedisMessagePublisher(
     }
 }
 
-data class PrivateEnvelope(val recipient: String, val sender: String, val content: String)
+data class PrivateEnvelope(val messageId: Long? = null, val recipient: String, val sender: String, val content: String)

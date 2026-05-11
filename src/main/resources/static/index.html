@@ -26,7 +26,12 @@
         .status-reconnecting { background: #ff02; color: #fa0; border: 1px solid #fa0; }
         .controls { margin: 12px 0; }
         .send-row { margin-top: 12px; }
-        .user-item { padding: 4px 0; color: #0f0; }
+        .user-item { padding: 4px 0; }
+        .user-item .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+        .user-item .online { background: #0f0; }
+        .user-item .away { background: #fa0; }
+        .user-item .offline { background: #666; }
+        .user-item .name { color: #eee; }
         h4 { color: #999; margin: 0 0 8px 0; }
         #reconnect-info { font-size: 11px; color: #888; margin-top: 4px; }
         .token-display { font-size: 10px; color: #666; word-break: break-all; margin-top: 4px; max-width: 600px; }
@@ -75,6 +80,8 @@
         let maxReconnectAttempts = 5;
         let reconnectTimer = null;
         let intentionalDisconnect = false;
+        let seenMessageIds = new Set();
+        let heartbeatInterval = null;
 
         function log(html) {
             const el = document.getElementById('chat-log');
@@ -175,7 +182,10 @@
                 stompClient.subscribe('/topic/messages', function(msg) {
                     const m = JSON.parse(msg.body);
                     if (m.type === 'CHAT') {
+                        if (m.id && seenMessageIds.has(m.id)) return;
+                        if (m.id) seenMessageIds.add(m.id);
                         log('<div class="msg"><span class="sender">' + m.sender + ':</span> ' + m.content + '</div>');
+                        if (m.id) sendAck(m.id);
                     } else if (m.type === 'JOIN') {
                         log('<div class="msg system">' + m.sender + ' joined</div>');
                         refreshUsers();
@@ -187,7 +197,10 @@
 
                 stompClient.subscribe('/user/queue/private', function(msg) {
                     const m = JSON.parse(msg.body);
+                    if (m.id && seenMessageIds.has(m.id)) return;
+                    if (m.id) seenMessageIds.add(m.id);
                     log('<div class="msg private">[PM from ' + m.sender + ']: ' + m.content + '</div>');
+                    if (m.id) sendAck(m.id);
                 });
 
                 stompClient.subscribe('/user/queue/errors', function(msg) {
@@ -207,6 +220,7 @@
 
                 refreshUsers();
                 loadHistory();
+                startPresenceHeartbeat();
             }, function(error) {
                 log('<div class="msg error">Connection lost</div>');
                 setStatus('disconnected');
@@ -235,12 +249,48 @@
             input.value = '';
         }
 
+        function sendAck(messageId) {
+            if (stompClient && stompClient.connected) {
+                stompClient.send('/app/ack', {}, JSON.stringify({ messageId: messageId }));
+            }
+        }
+
+        function startPresenceHeartbeat() {
+            if (heartbeatInterval) clearInterval(heartbeatInterval);
+            heartbeatInterval = setInterval(function() {
+                if (stompClient && stompClient.connected) {
+                    stompClient.send('/app/chat.heartbeat', {}, '{}');
+                }
+            }, 15000);
+        }
+
+        function stopPresenceHeartbeat() {
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+                heartbeatInterval = null;
+            }
+        }
+
         function refreshUsers() {
-            fetch('/users/online')
+            fetch('/presence')
                 .then(r => r.json())
-                .then(users => {
+                .then(presence => {
+                    const entries = Object.entries(presence);
                     document.getElementById('online-users').innerHTML =
-                        users.map(u => '<div class="user-item">' + u + '</div>').join('');
+                        entries.map(function(entry) {
+                            const user = entry[0];
+                            const status = entry[1];
+                            const dotClass = status === 'ONLINE' ? 'online' : status === 'AWAY' ? 'away' : 'offline';
+                            return '<div class="user-item"><span class="status-dot ' + dotClass + '"></span><span class="name">' + user + '</span></div>';
+                        }).join('');
+                })
+                .catch(function() {
+                    fetch('/users/online')
+                        .then(r => r.json())
+                        .then(users => {
+                            document.getElementById('online-users').innerHTML =
+                                users.map(u => '<div class="user-item"><span class="status-dot online"></span><span class="name">' + u + '</span></div>').join('');
+                        });
                 });
         }
 
@@ -251,6 +301,7 @@
                     if (messages.length > 0) {
                         log('<div class="msg system">--- Message History ---</div>');
                         messages.forEach(m => {
+                            if (m.id) seenMessageIds.add(m.id);
                             log('<div class="msg"><span class="sender">' + m.sender + ':</span> ' + m.content + '</div>');
                         });
                         log('<div class="msg system">--- End History ---</div>');
@@ -260,6 +311,7 @@
 
         function manualDisconnect() {
             intentionalDisconnect = true;
+            stopPresenceHeartbeat();
             if (reconnectTimer) clearTimeout(reconnectTimer);
             if (stompClient) stompClient.disconnect();
             setStatus('disconnected');

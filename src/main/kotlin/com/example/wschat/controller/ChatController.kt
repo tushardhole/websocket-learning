@@ -5,6 +5,7 @@ import com.example.wschat.model.MessageType
 import com.example.wschat.pubsub.PrivateEnvelope
 import com.example.wschat.pubsub.RedisMessagePublisher
 import com.example.wschat.service.ChatService
+import com.example.wschat.service.PresenceService
 import org.springframework.messaging.handler.annotation.MessageMapping
 import org.springframework.messaging.handler.annotation.Payload
 import org.springframework.messaging.simp.user.SimpUserRegistry
@@ -18,23 +19,33 @@ import java.security.Principal
 class ChatController(
     private val userRegistry: SimpUserRegistry,
     private val chatService: ChatService,
-    private val redisPublisher: RedisMessagePublisher
+    private val redisPublisher: RedisMessagePublisher,
+    private val presenceService: PresenceService
 ) {
 
     @MessageMapping("/chat")
     fun sendMessage(@Payload message: ChatMessage) {
         require(message.content.length <= 500) { "Message too long (max 500 chars)" }
         if (message.type == MessageType.CHAT) {
-            chatService.savePublicMessage(message)
+            val saved = chatService.savePublicMessage(message)
+            val enriched = message.copy(id = saved.id, timestamp = saved.timestamp.toEpochMilli())
+            redisPublisher.publishPublicMessage(enriched)
+        } else {
+            redisPublisher.publishPublicMessage(message)
         }
-        redisPublisher.publishPublicMessage(message)
+    }
+
+    @MessageMapping("/chat.heartbeat")
+    fun presenceHeartbeat(principal: Principal) {
+        presenceService.heartbeat(principal.name)
     }
 
     @MessageMapping("/private")
     fun sendPrivateMessage(@Payload message: PrivateMessage, principal: Principal) {
-        chatService.savePrivateMessage(principal.name, message.recipient, message.content)
+        val saved = chatService.savePrivateMessage(principal.name, message.recipient, message.content)
         redisPublisher.publishPrivateMessage(
             PrivateEnvelope(
+                messageId = saved.id,
                 recipient = message.recipient,
                 sender = principal.name,
                 content = message.content

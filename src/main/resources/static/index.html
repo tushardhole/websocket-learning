@@ -29,6 +29,7 @@
         .user-item { padding: 4px 0; color: #0f0; }
         h4 { color: #999; margin: 0 0 8px 0; }
         #reconnect-info { font-size: 11px; color: #888; margin-top: 4px; }
+        .token-display { font-size: 10px; color: #666; word-break: break-all; margin-top: 4px; max-width: 600px; }
     </style>
 </head>
 <body>
@@ -36,10 +37,15 @@
 
     <div class="controls">
         <input id="username" type="text" placeholder="Your name">
-        <button id="connectBtn" onclick="connect()">Connect</button>
+        <select id="role">
+            <option value="USER">USER</option>
+            <option value="ADMIN">ADMIN</option>
+        </select>
+        <button id="connectBtn" onclick="login()">Login & Connect</button>
         <button id="disconnectBtn" onclick="manualDisconnect()" disabled>Disconnect</button>
         <span id="status" class="status-disconnected">DISCONNECTED</span>
         <div id="reconnect-info"></div>
+        <div id="token-display" class="token-display"></div>
     </div>
 
     <div class="layout">
@@ -64,6 +70,7 @@
     <script>
         let stompClient = null;
         let currentUser = '';
+        let jwtToken = '';
         let reconnectAttempts = 0;
         let maxReconnectAttempts = 5;
         let reconnectTimer = null;
@@ -84,6 +91,7 @@
             document.getElementById('connectBtn').disabled = connected || reconnecting;
             document.getElementById('disconnectBtn').disabled = !connected && !reconnecting;
             document.getElementById('username').disabled = connected || reconnecting;
+            document.getElementById('role').disabled = connected || reconnecting;
             document.getElementById('message').disabled = !connected;
             document.getElementById('sendBtn').disabled = !connected;
             document.getElementById('sendMode').disabled = !connected;
@@ -108,49 +116,61 @@
         });
 
         function getReconnectDelay() {
-            // Exponential backoff: 1s, 2s, 4s, 8s, 16s (capped)
             return Math.min(1000 * Math.pow(2, reconnectAttempts), 16000);
         }
 
         function scheduleReconnect() {
             if (intentionalDisconnect || reconnectAttempts >= maxReconnectAttempts) {
                 if (reconnectAttempts >= maxReconnectAttempts) {
-                    log('<div class="msg error">Reconnection failed after ' + maxReconnectAttempts + ' attempts. Click Connect to try again.</div>');
+                    log('<div class="msg error">Reconnection failed after ' + maxReconnectAttempts + ' attempts.</div>');
                     setStatus('disconnected');
                 }
                 return;
             }
-
             const delay = getReconnectDelay();
             const seconds = (delay / 1000).toFixed(0);
             document.getElementById('reconnect-info').textContent =
                 'Attempt ' + (reconnectAttempts + 1) + '/' + maxReconnectAttempts + ' in ' + seconds + 's...';
-
             setStatus('reconnecting');
-            log('<div class="msg system">Reconnecting in ' + seconds + 's (attempt ' + (reconnectAttempts + 1) + '/' + maxReconnectAttempts + ')...</div>');
-
+            log('<div class="msg system">Reconnecting in ' + seconds + 's...</div>');
             reconnectTimer = setTimeout(function() {
                 reconnectAttempts++;
                 doConnect();
             }, delay);
         }
 
-        function connect() {
+        function login() {
             currentUser = document.getElementById('username').value.trim();
+            const role = document.getElementById('role').value;
             if (!currentUser) { alert('Enter a username'); return; }
-            intentionalDisconnect = false;
-            reconnectAttempts = 0;
-            doConnect();
+
+            fetch('/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: currentUser, role: role })
+            })
+            .then(r => r.json())
+            .then(data => {
+                jwtToken = data.token;
+                document.getElementById('token-display').textContent = 'JWT: ' + jwtToken.substring(0, 40) + '...';
+                log('<div class="msg system">Logged in as ' + currentUser + ' (role: ' + role + ')</div>');
+                intentionalDisconnect = false;
+                reconnectAttempts = 0;
+                doConnect();
+            })
+            .catch(err => {
+                log('<div class="msg error">Login failed: ' + err + '</div>');
+            });
         }
 
         function doConnect() {
-            const socket = new SockJS('/ws/chat?username=' + encodeURIComponent(currentUser));
+            const socket = new SockJS('/ws/chat?token=' + encodeURIComponent(jwtToken));
             stompClient = Stomp.over(socket);
 
             stompClient.connect({}, function(frame) {
                 reconnectAttempts = 0;
                 setStatus('connected');
-                log('<div class="msg system">Connected as ' + currentUser + '</div>');
+                log('<div class="msg system">WebSocket connected</div>');
 
                 stompClient.subscribe('/topic/messages', function(msg) {
                     const m = JSON.parse(msg.body);
@@ -170,17 +190,14 @@
                     log('<div class="msg private">[PM from ' + m.sender + ']: ' + m.content + '</div>');
                 });
 
-                // Subscribe to server-side errors
                 stompClient.subscribe('/user/queue/errors', function(msg) {
                     const err = JSON.parse(msg.body);
                     log('<div class="msg error">Server error: ' + err.error + '</div>');
                 });
 
                 refreshUsers();
-
             }, function(error) {
-                // Connection lost
-                log('<div class="msg error">Connection lost: ' + (error.headers ? error.headers.message : error) + '</div>');
+                log('<div class="msg error">Connection lost</div>');
                 setStatus('disconnected');
                 scheduleReconnect();
             });
@@ -192,20 +209,16 @@
             if (!text || !stompClient) return;
 
             const mode = document.getElementById('sendMode').value;
-
             if (mode === 'private') {
                 const recipient = document.getElementById('recipient').value.trim();
                 if (!recipient) { alert('Enter recipient username'); return; }
                 stompClient.send('/app/private', {}, JSON.stringify({
-                    recipient: recipient,
-                    content: text
+                    recipient: recipient, content: text
                 }));
                 log('<div class="msg private">[PM to ' + recipient + ']: ' + text + '</div>');
             } else {
                 stompClient.send('/app/chat', {}, JSON.stringify({
-                    sender: currentUser,
-                    content: text,
-                    type: 'CHAT'
+                    sender: currentUser, content: text, type: 'CHAT'
                 }));
             }
             input.value = '';

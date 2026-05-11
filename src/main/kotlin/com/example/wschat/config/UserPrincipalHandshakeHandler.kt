@@ -13,10 +13,11 @@ class UserPrincipalHandshakeHandler : DefaultHandshakeHandler() {
         attributes: Map<String, Any>
     ): Principal? {
         val username = attributes["username"] as? String ?: return null
-        return StompPrincipal(username)
+        val role = attributes["role"] as? String ?: "USER"
+        return StompPrincipal(username, role)
     }
 }
 
-data class StompPrincipal(private val name: String) : Principal {
-    override fun getName(): String = name
+data class StompPrincipal(private val username: String, val role: String) : Principal {
+    override fun getName(): String = username
 }

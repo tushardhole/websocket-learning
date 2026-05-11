@@ -1,8 +1,10 @@
 package com.example.wschat.config
 
+import com.example.wschat.security.JwtUtil
+import com.example.wschat.security.StompChannelInterceptor
 import org.springframework.context.annotation.Configuration
+import org.springframework.messaging.simp.config.ChannelRegistration
 import org.springframework.messaging.simp.config.MessageBrokerRegistry
-import org.springframework.scheduling.TaskScheduler
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry
@@ -11,7 +13,10 @@ import org.springframework.web.socket.config.annotation.WebSocketTransportRegist
 
 @Configuration
 @EnableWebSocketMessageBroker
-class WebSocketStompConfig : WebSocketMessageBrokerConfigurer {
+class WebSocketStompConfig(
+    private val jwtUtil: JwtUtil,
+    private val stompChannelInterceptor: StompChannelInterceptor
+) : WebSocketMessageBrokerConfigurer {
 
     override fun configureMessageBroker(registry: MessageBrokerRegistry) {
         val taskScheduler = ThreadPoolTaskScheduler().apply {
@@ -29,7 +34,7 @@ class WebSocketStompConfig : WebSocketMessageBrokerConfigurer {
     override fun registerStompEndpoints(registry: StompEndpointRegistry) {
         registry.addEndpoint("/ws/chat")
             .setAllowedOriginPatterns("*")
-            .addInterceptors(UserHandshakeInterceptor())
+            .addInterceptors(UserHandshakeInterceptor(jwtUtil))
             .setHandshakeHandler(UserPrincipalHandshakeHandler())
             .withSockJS()
     }
@@ -39,5 +44,9 @@ class WebSocketStompConfig : WebSocketMessageBrokerConfigurer {
             .setMessageSizeLimit(8 * 1024)
             .setSendBufferSizeLimit(512 * 1024)
             .setSendTimeLimit(20000)
+    }
+
+    override fun configureClientInboundChannel(registration: ChannelRegistration) {
+        registration.interceptors(stompChannelInterceptor)
     }
 }

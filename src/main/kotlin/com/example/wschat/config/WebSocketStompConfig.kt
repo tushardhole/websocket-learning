@@ -1,5 +1,6 @@
 package com.example.wschat.config
 
+import com.example.wschat.interceptor.RateLimitInterceptor
 import com.example.wschat.security.JwtUtil
 import com.example.wschat.security.StompChannelInterceptor
 import org.springframework.context.annotation.Configuration
@@ -15,7 +16,8 @@ import org.springframework.web.socket.config.annotation.WebSocketTransportRegist
 @EnableWebSocketMessageBroker
 class WebSocketStompConfig(
     private val jwtUtil: JwtUtil,
-    private val stompChannelInterceptor: StompChannelInterceptor
+    private val stompChannelInterceptor: StompChannelInterceptor,
+    private val rateLimitInterceptor: RateLimitInterceptor
 ) : WebSocketMessageBrokerConfigurer {
 
     override fun configureMessageBroker(registry: MessageBrokerRegistry) {
@@ -47,6 +49,10 @@ class WebSocketStompConfig(
     }
 
     override fun configureClientInboundChannel(registration: ChannelRegistration) {
-        registration.interceptors(stompChannelInterceptor)
+        registration.interceptors(rateLimitInterceptor, stompChannelInterceptor)
+            .taskExecutor()
+            .corePoolSize(4)
+            .maxPoolSize(8)
+            .queueCapacity(100)
     }
 }

@@ -25,6 +25,7 @@ class SecurityConfig {
                     .requestMatchers("/index.html", "/", "/favicon.ico").permitAll()
                     .requestMatchers("/messages/history").permitAll()
                     .requestMatchers("/h2-console/**").permitAll()
+                    .requestMatchers("/actuator/**").permitAll()
                     .anyRequest().authenticated()
             }
 

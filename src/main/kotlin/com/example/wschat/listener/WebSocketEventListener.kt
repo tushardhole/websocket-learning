@@ -1,5 +1,6 @@
 package com.example.wschat.listener
 
+import com.example.wschat.metrics.WebSocketMetrics
 import com.example.wschat.model.ChatMessage
 import com.example.wschat.model.MessageType
 import com.example.wschat.pubsub.RedisMessagePublisher
@@ -13,7 +14,8 @@ import org.springframework.web.socket.messaging.SessionDisconnectEvent
 @Component
 class WebSocketEventListener(
     private val redisPublisher: RedisMessagePublisher,
-    private val sessionRegistry: RedisSessionRegistry
+    private val sessionRegistry: RedisSessionRegistry,
+    private val metrics: WebSocketMetrics
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -21,6 +23,7 @@ class WebSocketEventListener(
     fun handleConnect(event: SessionConnectedEvent) {
         val username = event.user?.name ?: "unknown"
         log.info("User connected: $username")
+        metrics.onConnect()
         sessionRegistry.registerUser(username)
         redisPublisher.publishPublicMessage(
             ChatMessage(sender = username, content = "", type = MessageType.JOIN)
@@ -31,6 +34,7 @@ class WebSocketEventListener(
     fun handleDisconnect(event: SessionDisconnectEvent) {
         val username = event.user?.name ?: "unknown"
         log.info("User disconnected: $username")
+        metrics.onDisconnect()
         sessionRegistry.unregisterUser(username)
         redisPublisher.publishPublicMessage(
             ChatMessage(sender = username, content = "", type = MessageType.LEAVE)

@@ -196,6 +196,7 @@
                 });
 
                 refreshUsers();
+                loadHistory();
             }, function(error) {
                 log('<div class="msg error">Connection lost</div>');
                 setStatus('disconnected');
@@ -230,6 +231,20 @@
                 .then(users => {
                     document.getElementById('online-users').innerHTML =
                         users.map(u => '<div class="user-item">' + u + '</div>').join('');
+                });
+        }
+
+        function loadHistory() {
+            fetch('/messages/history?limit=50')
+                .then(r => r.json())
+                .then(messages => {
+                    if (messages.length > 0) {
+                        log('<div class="msg system">--- Message History ---</div>');
+                        messages.forEach(m => {
+                            log('<div class="msg"><span class="sender">' + m.sender + ':</span> ' + m.content + '</div>');
+                        });
+                        log('<div class="msg system">--- End History ---</div>');
+                    }
                 });
         }
 

@@ -195,6 +195,16 @@
                     log('<div class="msg error">Server error: ' + err.error + '</div>');
                 });
 
+                // Subscribe to system notifications (server shutdown, etc.)
+                stompClient.subscribe('/topic/system', function(msg) {
+                    const m = JSON.parse(msg.body);
+                    if (m.type === 'SERVER_SHUTDOWN') {
+                        log('<div class="msg error">Server restarting — reconnecting shortly...</div>');
+                        // Reset attempts so we get full retry budget for the restart
+                        reconnectAttempts = 0;
+                    }
+                });
+
                 refreshUsers();
                 loadHistory();
             }, function(error) {

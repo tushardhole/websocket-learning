@@ -7,5 +7,5 @@ data class ChatMessage(
 )
 
 enum class MessageType {
-    CHAT, JOIN, LEAVE
+    CHAT, JOIN, LEAVE, SERVER_SHUTDOWN
 }

@@ -35,12 +35,12 @@ class ChatService(private val messageRepository: MessageRepository) {
         return messageRepository.findByRecipientIsNullOrderByTimestampDesc(PageRequest.of(0, limit))
             .reversed()
             .filter { it.type == MessageType.CHAT.name }
-            .map { ChatMessage(sender = it.sender, content = it.content, type = MessageType.CHAT) }
+            .map { ChatMessage(id = it.id, sender = it.sender, content = it.content, type = MessageType.CHAT, timestamp = it.timestamp.toEpochMilli()) }
     }
 
     fun getPrivateMessages(username: String, limit: Int = 50): List<ChatMessage> {
         return messageRepository.findPrivateMessages(username, PageRequest.of(0, limit))
             .reversed()
-            .map { ChatMessage(sender = it.sender, content = it.content, type = MessageType.CHAT) }
+            .map { ChatMessage(id = it.id, sender = it.sender, content = it.content, type = MessageType.CHAT, timestamp = it.timestamp.toEpochMilli()) }
     }
 }

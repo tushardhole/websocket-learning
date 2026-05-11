@@ -22,7 +22,7 @@ A practical, incremental learning project for WebSockets. Each level builds on t
 | 7 | Scaling Out | Redis pub/sub, multi-instance, load balancer — [Deep Dive](docs/level-7-scaling-deep-dive.md) |
 | 8 | Pod Restarts | Graceful shutdown, session recovery |
 | 9 | Performance | Rate limiting, metrics, load testing |
-| 10 | Production Architecture | Presence, delivery guarantees, observability |
+| 10 | Production Architecture | Presence, delivery guarantees, observability — [Architecture](docs/architecture.md) |
 
 ## Running
 

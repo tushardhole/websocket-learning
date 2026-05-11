@@ -26,7 +26,7 @@ class RedisMessageSubscriber(
         messagingTemplate.convertAndSendToUser(
             envelope.recipient,
             "/queue/private",
-            ChatMessage(sender = envelope.sender, content = envelope.content, type = MessageType.CHAT)
+            ChatMessage(id = envelope.messageId, sender = envelope.sender, content = envelope.content, type = MessageType.CHAT)
         )
     }
 }
